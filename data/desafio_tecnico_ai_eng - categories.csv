@@ -1,0 +1,10 @@
+category_id,name,description
+1,Guitarras,"Guitarras elétricas de todos os estilos, do rock ao jazz"
+2,Baixos,Baixos elétricos e acústicos para todas as formações
+3,Baterias e Percussão,"Baterias acústicas, eletrônicas e peças avulsas de percussão"
+4,Teclados e Pianos,"Pianos digitais, sintetizadores, arranjadores e controladores MIDI"
+5,Violões,"Violões clássicos, folk e eletroacústicos"
+6,Instrumentos de Sopro (Madeiras),"Flautas, clarinetes, saxofones, oboés e outros instrumentos de sopro em madeira"
+7,Instrumentos de Sopro (Metais),"Trompetes, trombones, tubas, trompas e outros metais"
+8,Cordas Orquestrais,"Violinos, violas, violoncelos e contrabaixos acústicos"
+9,Ukuleles,"Ukuleles soprano, concert, tenor e barítono"

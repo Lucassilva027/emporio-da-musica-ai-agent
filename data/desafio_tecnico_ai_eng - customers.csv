@@ -1,0 +1,51 @@
+customer_id,name,phone,email,city
+1,Lucas Mendes da Silva,(67) 99812-3456,lucas.mendes@jmail.com,Campo Grande
+2,Ana Carolina Ferreira,(67) 99654-7821,anacarol.ferreira@coldmail.com,Campo Grande
+3,Pedro Henrique Oliveira,(67) 98432-1098,pedro.oliveira@jmail.com,Campo Grande
+4,Mariana Costa Santos,(67) 99123-4567,mariana.costa@inlook.com,Campo Grande
+5,Rafael Augusto Pereira,(67) 98765-4321,rafael.pereira@jmail.com,Campo Grande
+6,Juliana Almeida Rodrigues,(67) 99234-5678,juliana.almeida@hayoo.com.br,Campo Grande
+7,Thiago Barbosa Lima,(67) 98321-6543,thiago.barbosa@jmail.com,Campo Grande
+8,Fernanda Ribeiro Souza,(67) 99456-7890,fernanda.ribeiro@coldmail.com,Campo Grande
+9,Gabriel Santos Araújo,(67) 98654-3210,gabriel.araujo@jmail.com,Dourados
+10,Camila Duarte Nascimento,(67) 99567-8901,camila.duarte@inlook.com,Campo Grande
+11,Bruno Carvalho Martins,(67) 98543-2109,bruno.martins@jmail.com,Três Lagoas
+12,Isabela Moreira Cunha,(67) 99678-9012,isabela.moreira@jmail.com,Campo Grande
+13,Diego Fernandes Castro,(67) 98210-9876,diego.castro@coldmail.com,Campo Grande
+14,Letícia Gonçalves Rocha,(67) 99789-0123,leticia.rocha@jmail.com,Campo Grande
+15,Matheus Ramos Correia,(67) 98109-8765,matheus.correia@hayoo.com.br,Corumbá
+16,Patrícia Vieira Cardoso,(67) 99890-1234,patricia.cardoso@jmail.com,Campo Grande
+17,Gustavo Teixeira Nunes,(67) 98098-7654,gustavo.nunes@inlook.com,Ponta Porã
+18,Aline Borges Monteiro,(67) 99901-2345,aline.monteiro@jmail.com,Campo Grande
+19,Rodrigo Silva,(67) 99111-2222,rodrigo.silva@jmail.com,Campo Grande
+20,Amanda Lima,(67) 99222-3333,amanda.lima@coldmail.com,Dourados
+21,Felipe Gomes,(67) 99333-4444,felipe.gomes@jmail.com,Três Lagoas
+22,Beatriz Rocha,(67) 99444-5555,beatriz.rocha@inlook.com,Campo Grande
+23,Marcelo Dias,(67) 99555-6666,marcelo.dias@hayoo.com.br,Corumbá
+24,Camila Alves,(67) 99666-7777,camila.alves@jmail.com,Ponta Porã
+25,Thiago Costa,(67) 99777-8888,thiago.costa@coldmail.com,Campo Grande
+26,Larissa Mendes,(67) 99888-9999,larissa.mendes@jmail.com,Campo Grande
+27,Bruno Carvalho,(67) 99999-0000,bruno.carvalho@inlook.com,Dourados
+28,Juliana Castro,(67) 99000-1111,juliana.castro@jmail.com,Três Lagoas
+29,Leonardo Santos,(67) 99123-9876,leonardo.santos@hayoo.com.br,Campo Grande
+30,Natália Martins,(67) 99876-1234,natalia.martins@jmail.com,Campo Grande
+31,Joao Silva,(67) 99111-1234,joao.silva@jmail.com,Campo Grande
+32,Maria Oliveira,(67) 99222-2345,maria.oliveira@coldmail.com,Dourados
+33,Carlos Souza,(67) 99333-3456,carlos.souza@inlook.com,Três Lagoas
+34,Ana Costa,(67) 99444-4567,ana.costa@hayoo.com.br,Corumbá
+35,Pedro Santos,(67) 99555-5678,pedro.santos@jmail.com,Ponta Porã
+36,Paula Lima,(67) 99666-6789,paula.lima@coldmail.com,Campo Grande
+37,Lucas Pereira,(67) 99777-7890,lucas.pereira@inlook.com,Dourados
+38,Julia Carvalho,(67) 99888-8901,julia.carvalho@hayoo.com.br,Três Lagoas
+39,Marcos Rodrigues,(67) 99999-9012,marcos.rodrigues@jmail.com,Corumbá
+40,Fernanda Almeida,(67) 99123-0123,fernanda.almeida@coldmail.com,Ponta Porã
+41,Rafael Alves,(67) 99234-1234,rafael.alves@inlook.com,Campo Grande
+42,Camila Ribeiro,(67) 99345-2345,camila.ribeiro@hayoo.com.br,Dourados
+43,Bruno Martins,(67) 99456-3456,bruno.martins@jmail.com,Três Lagoas
+44,Leticia Gomes,(67) 99567-4567,leticia.gomes@coldmail.com,Corumbá
+45,Thiago Dias,(67) 99678-5678,thiago.dias@inlook.com,Ponta Porã
+46,Amanda Rocha,(67) 99789-6789,amanda.rocha@hayoo.com.br,Campo Grande
+47,Diego Castro,(67) 99890-7890,diego.castro@jmail.com,Dourados
+48,Beatriz Mendes,(67) 99901-8901,beatriz.mendes@coldmail.com,Três Lagoas
+49,Felipe Nunes,(67) 99012-9012,felipe.nunes@inlook.com,Corumbá
+50,Mariana Cardoso,(67) 99123-1111,mariana.cardoso@hayoo.com.br,Ponta Porã

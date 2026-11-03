@@ -1,0 +1,26 @@
+promotion_id,product_id,discount_percent,description,is_active
+1,102,10,Black Friday,0
+2,110,15,Liquidação de Inverno,0
+3,122,20,Queima de Estoque,0
+4,95,12,Oferta Especial,0
+5,126,25,Aniversário da Loja,0
+6,93,15,Promoção de Páscoa,0
+7,91,30,Black Friday,0
+8,96,18,Semana do Músico,0
+9,99,8,Promoção de Páscoa,0
+10,116,20,Aniversário da Loja,0
+11,119,10,Liquidação de Inverno,0
+12,127,10,Oferta Especial,1
+13,134,15,Queima de Estoque,0
+14,121,20,Desconto Exclusivo,1
+15,106,12,Semana do Músico,0
+16,113,25,Black Friday,0
+17,125,30,Aniversário da Loja,0
+18,133,5,Oferta Especial,0
+19,90,18,Desconto Exclusivo,1
+20,140,22,Queima de Estoque,0
+21,139,35,Liquidação de Inverno,0
+22,96,40,Semana do Músico,0
+23,93,10,Promoção de Páscoa,0
+24,94,8,Desconto Exclusivo,1
+25,99,14,Aniversário da Loja,0
