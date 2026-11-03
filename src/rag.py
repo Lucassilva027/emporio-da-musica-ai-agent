@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
+import os
 import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -23,6 +25,11 @@ from sklearn.metrics.pairwise import cosine_similarity
 
 from src.config import POLICIES_PDF_PATH, STORAGE_DIR
 from src.database import normalize_text
+
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+logging.getLogger("transformers").setLevel(logging.ERROR)
+logging.getLogger("sentence_transformers").setLevel(logging.ERROR)
 
 
 @dataclass
