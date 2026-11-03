@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable
@@ -22,6 +23,9 @@ from src.prompts import build_system_prompt
 from src.tools import StoreToolkit, format_brl
 
 MAX_USER_MESSAGE_CHARS = 2000
+MAX_TOOL_RESULT_CHARS = 3500
+LLM_HISTORY_MESSAGES = 6
+LLM_MAX_TOOL_ROUNDS = 2
 
 
 @dataclass
@@ -95,14 +99,22 @@ class EmporioAgent:
         else:
             try:
                 result = self._run_llm_function_calling(user_message)
-            except Exception:
+            except Exception as exc:
                 # Fallback gracioso sem vazar detalhes internos da API ao cliente
                 fallback = self._run_local_engine(user_message)
-                fallback.reply = (
-                    f"{fallback.reply}\n\n"
-                    "_(Obs.: houve uma instabilidade no provedor de linguagem; "
-                    "usei o motor local de backup para não te deixar na mão.)_"
-                )
+                err = str(exc)
+                if "429" in err or "rate_limit" in err.lower():
+                    note = (
+                        "_(Obs.: a API gratuita atingiu o limite de tokens por minuto. "
+                        "Respondi com o motor local; aguarde alguns segundos e tente de novo "
+                        "para usar o LLM.)_"
+                    )
+                else:
+                    note = (
+                        "_(Obs.: houve uma instabilidade no provedor de linguagem; "
+                        "usei o motor local de backup para não te deixar na mão.)_"
+                    )
+                fallback.reply = f"{fallback.reply}\n\n{note}"
                 result = fallback
 
         self.db.save_message(
@@ -125,65 +137,57 @@ class EmporioAgent:
         tools = self.toolkit.get_openai_tool_schemas()
 
         messages: list[dict[str, Any]] = [{"role": "system", "content": system_prompt}]
-        # Mantém as últimas 12 mensagens da conversa para contexto
-        for m in self._messages[-12:]:
+        # Histórico curto: free tier da Groq tem pouco ITPM
+        for m in self._messages[-LLM_HISTORY_MESSAGES:]:
             messages.append({"role": m["role"], "content": m["content"]})
 
         tool_trace: list[dict[str, Any]] = []
-        max_rounds = 5
 
-        for _ in range(max_rounds):
-            response = self._chat_completions(messages, tools=tools)
-            choice = response["choices"][0]["message"]
-            tool_calls = choice.get("tool_calls") or []
+        # No máximo 1 rodada de tools + 1 resposta final (free tier Groq estoura fácil com 3+ calls)
+        response = self._chat_completions(messages, tools=tools)
+        choice = response["choices"][0]["message"]
+        tool_calls = choice.get("tool_calls") or []
 
-            if not tool_calls:
-                reply = (choice.get("content") or "").strip()
-                return AgentTurnResult(
-                    reply=reply or "Pronto! Posso te ajudar com mais alguma coisa?",
-                    tool_calls=tool_trace,
-                    provider=self.provider_name,
-                    model=self.model_name,
-                    session_id=self.session_id,
-                )
+        if not tool_calls:
+            reply = (choice.get("content") or "").strip()
+            return AgentTurnResult(
+                reply=reply or "Pronto! Posso te ajudar com mais alguma coisa?",
+                tool_calls=tool_trace,
+                provider=self.provider_name,
+                model=self.model_name,
+                session_id=self.session_id,
+            )
 
-            # Anexa a mensagem do assistant com tool_calls
+        assistant_msg: dict[str, Any] = {"role": "assistant", "tool_calls": tool_calls}
+        if choice.get("content"):
+            assistant_msg["content"] = choice["content"]
+        messages.append(assistant_msg)
+
+        for idx, tc in enumerate(tool_calls):
+            fn = tc.get("function", {})
+            name = fn.get("name", "")
+            raw_args = fn.get("arguments") or "{}"
+            try:
+                args = json.loads(raw_args) if isinstance(raw_args, str) else (raw_args or {})
+            except json.JSONDecodeError:
+                args = {}
+
+            if self.on_tool_call:
+                self.on_tool_call(name, args)
+
+            result = self.toolkit.execute_tool(name, args)
+            tool_trace.append({"name": name, "arguments": args, "result_preview": _preview(result)})
+            self._maybe_update_customer_context(result)
+
+            compact = _compact_tool_result(result)
             messages.append(
                 {
-                    "role": "assistant",
-                    "content": choice.get("content") or "",
-                    "tool_calls": tool_calls,
+                    "role": "tool",
+                    "tool_call_id": tc.get("id") or f"call_{idx}_{name}",
+                    "content": json.dumps(compact, ensure_ascii=False, default=str),
                 }
             )
 
-            for tc in tool_calls:
-                fn = tc.get("function", {})
-                name = fn.get("name", "")
-                raw_args = fn.get("arguments") or "{}"
-                try:
-                    args = json.loads(raw_args) if isinstance(raw_args, str) else (raw_args or {})
-                except json.JSONDecodeError:
-                    args = {}
-
-                if self.on_tool_call:
-                    self.on_tool_call(name, args)
-
-                result = self.toolkit.execute_tool(name, args)
-                tool_trace.append({"name": name, "arguments": args, "result_preview": _preview(result)})
-
-                # Extrai contexto de cliente se a tool retornou dados de pedido
-                self._maybe_update_customer_context(result)
-
-                messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": tc.get("id", name),
-                        "name": name,
-                        "content": json.dumps(result, ensure_ascii=False, default=str),
-                    }
-                )
-
-        # Se esgotou as rodadas, força uma resposta final sem tools
         final = self._chat_completions(messages, tools=None)
         reply = (final["choices"][0]["message"].get("content") or "").strip()
         return AgentTurnResult(
@@ -203,7 +207,7 @@ class EmporioAgent:
             "model": self.llm["model"],
             "messages": messages,
             "temperature": 0.3,
-            "max_tokens": 1200,
+            "max_tokens": 900,
         }
         if tools:
             payload["tools"] = tools
@@ -215,11 +219,30 @@ class EmporioAgent:
         }
         url = f"{self.llm['base_url'].rstrip('/')}/chat/completions"
 
+        last_error = ""
         with httpx.Client(timeout=60.0) as client:
-            resp = client.post(url, headers=headers, json=payload)
-            if resp.status_code >= 400:
-                raise RuntimeError(f"HTTP {resp.status_code}: {resp.text[:400]}")
-            return resp.json()
+            for attempt in range(4):
+                resp = client.post(url, headers=headers, json=payload)
+                if resp.status_code == 429:
+                    last_error = resp.text[:400]
+                    # Free tier Groq: aguarda reset de tokens e tenta de novo
+                    wait_s = 1.5 * (attempt + 1)
+                    reset = resp.headers.get("x-ratelimit-reset-tokens", "")
+                    # ex.: "771ms" ou "1.2s"
+                    try:
+                        if reset.endswith("ms"):
+                            wait_s = max(wait_s, float(reset[:-2]) / 1000.0 + 0.15)
+                        elif reset.endswith("s"):
+                            wait_s = max(wait_s, float(reset[:-1]) + 0.15)
+                    except ValueError:
+                        pass
+                    time.sleep(min(wait_s, 8.0))
+                    continue
+                if resp.status_code >= 400:
+                    raise RuntimeError(f"HTTP {resp.status_code}: {resp.text[:400]}")
+                return resp.json()
+
+        raise RuntimeError(f"HTTP 429: {last_error}")
 
     def _maybe_update_customer_context(self, tool_result: dict[str, Any]) -> None:
         orders = tool_result.get("orders") or []
@@ -990,3 +1013,128 @@ def _brl(value: float | int | None) -> str:
 def _preview(data: Any, limit: int = 280) -> str:
     text = json.dumps(data, ensure_ascii=False, default=str)
     return text if len(text) <= limit else text[:limit] + "…"
+
+
+def _compact_tool_result(result: dict[str, Any]) -> dict[str, Any]:
+    """Reduz payload das tools para caber no rate limit (ITPM) da Groq free tier."""
+    if not isinstance(result, dict):
+        return {"value": str(result)[:500]}
+
+    if result.get("error"):
+        return {"error": result.get("error"), "message": result.get("message")}
+
+    compact: dict[str, Any] = {"status": result.get("status", "ok")}
+
+    if "products" in result:
+        products = []
+        for p in (result.get("products") or [])[:6]:
+            products.append(
+                {
+                    "id": p.get("product_id"),
+                    "name": p.get("name"),
+                    "category": p.get("category_name"),
+                    "price": p.get("effective_price_brl"),
+                    "pix": p.get("pix_price_brl"),
+                    "installments": (p.get("installment_plan") or {}).get("summary"),
+                    "stock": p.get("stock_quantity"),
+                    "available": p.get("is_available"),
+                    "status": p.get("effective_status"),
+                    "promo": p.get("active_promotion"),
+                    "desc": (p.get("description") or "")[:140],
+                    "note": (p.get("data_quality_notes") or "")[:120] or None,
+                }
+            )
+        compact.update(
+            {
+                "total_available": result.get("total_available_matching"),
+                "products": products,
+                "alternatives": [
+                    {
+                        "id": a.get("product_id"),
+                        "name": a.get("name"),
+                        "price": a.get("effective_price_brl"),
+                    }
+                    for a in (result.get("suggested_alternatives_for_unavailable") or [])[:3]
+                ],
+                "out_of_scope": result.get("status") == "out_of_scope_accessory",
+                "policy_rule": result.get("policy_rule"),
+                "message": result.get("message"),
+            }
+        )
+    elif "brands" in result:
+        compact.update(
+            {
+                "brands_count": result.get("brands_count"),
+                "category": result.get("resolved_category"),
+                "brands": [
+                    {
+                        "brand": b.get("brand"),
+                        "count": b.get("product_count"),
+                        "min": b.get("min_price_brl"),
+                        "max": b.get("max_price_brl"),
+                    }
+                    for b in (result.get("brands") or [])[:20]
+                ],
+            }
+        )
+    elif "orders" in result:
+        compact["orders"] = []
+        for o in (result.get("orders") or [])[:3]:
+            compact["orders"].append(
+                {
+                    "order_id": o.get("order_id"),
+                    "status": o.get("status_pt") or o.get("status"),
+                    "date": o.get("order_date"),
+                    "delivery": o.get("estimated_or_actual_delivery"),
+                    "total": o.get("total_brl"),
+                    "payment": o.get("payment_method"),
+                    "tracking": o.get("tracking_code"),
+                    "customer": (o.get("customer") or {}).get("name"),
+                    "city": (o.get("customer") or {}).get("city"),
+                    "items": [
+                        {
+                            "name": i.get("product_name"),
+                            "qty": i.get("quantity"),
+                            "price": i.get("unit_price_brl"),
+                        }
+                        for i in (o.get("items") or [])[:5]
+                    ],
+                    "eligibility": o.get("return_and_warranty_eligibility"),
+                }
+            )
+        compact["reference_date"] = result.get("reference_date_used")
+        compact["message"] = result.get("message")
+    elif "retrieved_sections" in result:
+        compact["sections"] = [
+            {
+                "section": s.get("section_number"),
+                "title": s.get("section_title"),
+                "content": (s.get("content") or "")[:700],
+            }
+            for s in (result.get("retrieved_sections") or [])[:2]
+        ]
+        compact["store"] = {
+            "name": (result.get("store_metadata") or {}).get("nome_fantasia"),
+            "address": (result.get("store_metadata") or {}).get("endereco"),
+            "hours": {
+                "seg_sex": (result.get("store_metadata") or {}).get("horario_seg_sex"),
+                "sab": (result.get("store_metadata") or {}).get("horario_sabado"),
+            },
+        }
+    elif "active_promotions" in result:
+        compact["active"] = (result.get("active_promotions") or [])[:8]
+        compact["expired_sample"] = (result.get("expired_promotions") or [])[:3]
+        compact["policy_rules"] = (result.get("policy_rules") or "")[:280]
+    elif "payment_options" in result:
+        compact = {
+            "amount": result.get("base_amount_brl"),
+            "payment": result.get("payment_options"),
+            "shipping": result.get("shipping_options"),
+        }
+    else:
+        compact = result
+
+    raw = json.dumps(compact, ensure_ascii=False, default=str)
+    if len(raw) > MAX_TOOL_RESULT_CHARS:
+        return {"truncated": True, "data": raw[:MAX_TOOL_RESULT_CHARS]}
+    return compact
