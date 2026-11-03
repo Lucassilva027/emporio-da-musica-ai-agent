@@ -57,7 +57,7 @@ def get_llm_config(override_provider: str | None = None) -> dict[str, str]:
     """Resolve dinamicamente a configuração do provedor de LLM.
 
     Suporta:
-    - groq (Gratuito e recomendado: llama-3.3-70b-versatile)
+    - groq (Gratuito e recomendado: qwen/qwen3.8-27b)
     - gemini (Gratuito via Google AI Studio: gemini-2.5-flash)
     - openai (gpt-4o-mini / gpt-4o)
     - ollama (Modelos locais via http://localhost:11434/v1)
