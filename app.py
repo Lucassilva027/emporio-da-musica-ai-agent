@@ -54,25 +54,35 @@ st.markdown(
 )
 
 
-def get_agent() -> EmporioAgent:
-    if "agent" not in st.session_state:
-        provider = st.session_state.get("provider_choice", "auto")
+def _provider_arg(choice: str) -> str | None:
+    return None if choice == "auto" else choice
+
+
+def get_agent(provider_choice: str) -> EmporioAgent:
+    """Cria/recria o agente quando o provedor da sidebar muda."""
+    desired = provider_choice or "auto"
+    current = st.session_state.get("agent")
+    bound = st.session_state.get("agent_provider_choice")
+
+    if current is None or bound != desired:
         st.session_state.agent = EmporioAgent(
             session_id=st.session_state.get("session_id"),
-            provider=None if provider == "auto" else provider,
+            provider=_provider_arg(desired),
         )
         st.session_state.session_id = st.session_state.agent.session_id
-        st.session_state.messages = [
-            {
-                "role": "assistant",
-                "content": (
-                    f"Olá! Eu sou o **Tom**, da {STORE_INFO['nome_fantasia']}. "
-                    f"{STORE_INFO['slogan']}\n\n"
-                    "Posso ajudar com catálogo, preços, estoque, promoções, "
-                    "pedidos, trocas/devoluções e horários. Como posso te ajudar?"
-                ),
-            }
-        ]
+        st.session_state.agent_provider_choice = desired
+        if "messages" not in st.session_state:
+            st.session_state.messages = [
+                {
+                    "role": "assistant",
+                    "content": (
+                        f"Olá! Eu sou o **Tom**, da {STORE_INFO['nome_fantasia']}. "
+                        f"{STORE_INFO['slogan']}\n\n"
+                        "Posso ajudar com catálogo, preços, estoque, promoções, "
+                        "pedidos, trocas/devoluções e horários. Como posso te ajudar?"
+                    ),
+                }
+            ]
     return st.session_state.agent
 
 
@@ -93,15 +103,25 @@ with st.sidebar:
             st.session_state.agent.reset()
         st.session_state.session_id = str(uuid.uuid4())
         st.session_state.pop("agent", None)
+        st.session_state.pop("agent_provider_choice", None)
         st.session_state.pop("messages", None)
         st.session_state.provider_choice = provider_choice
         st.rerun()
 
     st.session_state.provider_choice = provider_choice
-    cfg = get_llm_config(None if provider_choice == "auto" else provider_choice)
+    cfg = get_llm_config(_provider_arg(provider_choice))
     st.markdown("---")
-    st.markdown(f"**Ativo:** `{cfg['provider']}`")
+    st.markdown(f"**Configurado:** `{cfg['provider']}`")
     st.caption(cfg["model"])
+    if cfg["provider"] == "local":
+        st.warning(
+            "Nenhuma API key detectada no `.env`. "
+            "Preencha `GROQ_API_KEY` ou `GEMINI_API_KEY` e reinicie o Streamlit."
+        )
+    elif not cfg.get("api_key"):
+        st.error(f"Provedor `{provider_choice}` selecionado, mas a API key correspondente está vazia no `.env`.")
+    else:
+        st.success(f"API key detectada para `{cfg['provider']}`.")
     st.markdown("---")
     st.markdown(
         f"**Endereço**\n\n{STORE_INFO['endereco']}\n\n"
@@ -114,7 +134,8 @@ with st.sidebar:
 st.markdown(f'<div class="brand">{STORE_INFO["nome_fantasia"]}</div>', unsafe_allow_html=True)
 st.markdown(f'<div class="tagline">{STORE_INFO["slogan"]} · Assistente Tom</div>', unsafe_allow_html=True)
 
-agent = get_agent()
+agent = get_agent(provider_choice)
+st.caption(f"Agente em uso: **{agent.provider_name}** / `{agent.model_name}`")
 
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"], avatar="🎸" if msg["role"] == "assistant" else "👤"):
@@ -138,6 +159,7 @@ if prompt:
             with st.expander("Ferramentas usadas"):
                 for t in result.tool_calls:
                     st.code(f"{t['name']}({t['arguments']})", language="python")
+        st.caption(f"Respondido via **{result.provider}**")
 
     st.session_state.messages.append(
         {

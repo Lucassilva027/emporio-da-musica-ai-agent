@@ -6,17 +6,18 @@ import os
 from datetime import date
 from pathlib import Path
 
-try:
-    from dotenv import load_dotenv
-
-    load_dotenv()
-except ImportError:
-    pass
-
 ROOT_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT_DIR / "data"
 STORAGE_DIR = ROOT_DIR / "storage"
 STORAGE_DIR.mkdir(parents=True, exist_ok=True)
+
+try:
+    from dotenv import load_dotenv
+
+    # Caminho absoluto: funciona mesmo se o Streamlit/CLI iniciar noutro cwd
+    load_dotenv(ROOT_DIR / ".env", override=False)
+except ImportError:
+    pass
 
 DB_PATH = STORAGE_DIR / "emporio_da_musica.db"
 POLICIES_PDF_PATH = DATA_DIR / "políticas_da_loja.pdf"
