@@ -85,7 +85,8 @@ def get_llm_config(override_provider: str | None = None) -> dict[str, str]:
             "provider": "groq",
             "api_key": groq_key,
             "base_url": "https://api.groq.com/openai/v1",
-            "model": os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile").strip(),
+            # Groq descontinuou vários Llama públicos; qwen3.8-27b está disponível e com function calling
+            "model": os.getenv("GROQ_MODEL", "qwen/qwen3.8-27b").strip(),
         }
     if provider == "gemini":
         return {
