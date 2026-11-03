@@ -32,15 +32,18 @@ copy .env.example .env   # Windows
 
 ### 3. Configurar o LLM (opcional, mas recomendado)
 
-O projeto funciona **sem nenhuma API key** graças ao motor local híbrido. Para Function Calling com LLM (melhor fluência de linguagem), edite o `.env`:
+O projeto funciona **sem nenhuma API key** graças ao motor local híbrido. Para Function Calling com LLM (melhor fluência), edite o `.env` — o ideal é cadastrar **Groq e Gemini juntos** (failover automático se a Groq estourar o free tier):
 
-| Provedor | Gratuito? | Onde obter a chave | Variável |
-|----------|-----------|--------------------|----------|
-| **Groq** (recomendado) | Sim | https://console.groq.com/keys | `GROQ_API_KEY` |
-| **Google Gemini** (failover) | Sim | https://aistudio.google.com/apikey | `GEMINI_API_KEY` |
-| Local | Sempre | Nenhuma | `LLM_PROVIDER=local` |
+| Provedor | Modelo padrão | Onde obter a chave | Variável |
+|----------|---------------|--------------------|----------|
+| **Groq** (prioridade) | `qwen/qwen3.8-27b` | https://console.groq.com/keys | `GROQ_API_KEY` |
+| **Google Gemini** (failover) | `gemini-2.5-flash` | https://aistudio.google.com/apikey | `GEMINI_API_KEY` |
+| Local | — | Nenhuma | `LLM_PROVIDER=local` |
 
-`LLM_PROVIDER=auto` prioriza Groq → Gemini. Se a Groq atingir rate limit, o agente faz failover automático para o Gemini. Sem keys, usa o motor local.
+- `LLM_PROVIDER=auto` (padrão): usa a primeira key disponível na ordem Groq → Gemini; sem keys, cai no motor local.
+- Só OpenAI-compatible **Groq** e **Gemini** entram no projeto (sem OpenAI paga / Ollama).
+- Após alterar o `.env`, **reinicie** o Streamlit/CLI para recarregar as keys.
+- Diagnóstico rápido: `python scripts/ping_llm.py`
 
 ### 4. Interfaces
 
@@ -50,6 +53,7 @@ O projeto funciona **sem nenhuma API key** graças ao motor local híbrido. Para
 python cli.py
 python cli.py --provider local --show-tools
 python cli.py --provider groq
+python cli.py --provider gemini
 ```
 
 Comandos na CLI: `/help`, `/reset`, `/tools on|off`, `/sair`.
@@ -59,6 +63,8 @@ Comandos na CLI: `/help`, `/reset`, `/tools on|off`, `/sair`.
 ```bash
 streamlit run app.py
 ```
+
+Na sidebar: escolha do provedor (`auto` / `groq` / `gemini` / `local`) e status do failover cloud.
 
 ### 5. Testes
 
@@ -161,7 +167,9 @@ Pipeline ETL em `src/database.py` (versão `2.0`):
 ├── .env.example
 ├── data/                  # CSVs + políticas_da_loja.pdf
 ├── examples/              # 5 conversas de demonstração
-├── scripts/generate_examples.py
+├── scripts/
+│   ├── generate_examples.py
+│   └── ping_llm.py        # testa se a API key do .env responde
 ├── src/
 │   ├── agent.py           # Orquestração LLM + motor local
 │   ├── config.py
