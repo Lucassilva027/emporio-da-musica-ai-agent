@@ -212,9 +212,11 @@ Utilizei o **Cursor** (agente Auto / Composer) como copiloto de implementação:
 - Leitura e limpeza do PDF de políticas + exploração dos CSVs.
 - Scaffolding da arquitetura híbrida (ETL → tools → RAG → agent → CLI/Streamlit).
 - Escrita de testes e geração dos exemplos de conversa.
-- Decisões de produto (persona Tom, `REFERENCE_DATE`, motor local zero-config, Groq como default gratuito) foram definidas e revisadas por mim; o assistente acelerou boilerplate, refino de prompts e commits progressivos.
+- Decisões de produto (persona Tom, `REFERENCE_DATE`, motor local zero-config, Groq como default gratuito) foram definidas e revisadas por mim; o assistente acelerou boilerplate e o refino de prompts.
 
-Não houve geração “caixa-preta” de um monólito único: o histórico Git reflete iterações (dados → RAG → tools → agente → UI → docs).
+**Revisão humana do histórico Git:** cada commit progressivo foi revisado por mim antes (e após) o push — conferindo mensagem, diff, escopo da mudança e se o estado do código fazia sentido para a etapa (dados → RAG → tools → agente → UI → testes/segurança → docs). Não aceitei commits “caixa-preta”: quando algo saía do combinado (ex.: bugs de parsing de preço, máscara LGPD, cobertura de testes), eu pedi correção e só então consolidei no repositório público.
+
+O histórico Git, portanto, reflete iterações reais com supervisão minha em cada etapa, e não um dump único gerado automaticamente.
 
 ---
 
