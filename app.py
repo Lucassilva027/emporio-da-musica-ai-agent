@@ -92,9 +92,9 @@ with st.sidebar:
     st.markdown("---")
     provider_choice = st.selectbox(
         "Provedor LLM",
-        options=["auto", "local", "groq", "gemini", "openai", "ollama"],
+        options=["auto", "local", "groq", "gemini"],
         index=0,
-        help="auto usa a primeira API key disponível; senão cai no motor local.",
+        help="auto usa Groq → Gemini conforme keys no .env; senão cai no motor local.",
     )
     show_tools = st.toggle("Mostrar tool calls", value=True)
 

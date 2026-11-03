@@ -44,7 +44,7 @@ def print_banner(agent: EmporioAgent) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="CLI do Agente Empório da Música")
-    parser.add_argument("--provider", default=None, help="auto|groq|gemini|openai|ollama|local")
+    parser.add_argument("--provider", default=None, help="auto|groq|gemini|local")
     parser.add_argument("--session", default=None, help="ID de sessão para retomar histórico")
     parser.add_argument("--show-tools", action="store_true", help="Exibe tool calls no terminal")
     args = parser.parse_args()

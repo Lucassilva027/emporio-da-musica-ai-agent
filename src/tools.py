@@ -936,7 +936,7 @@ class StoreToolkit:
         }
 
     def get_openai_tool_schemas(self) -> list[dict[str, Any]]:
-        """Retorna os schemas JSON compatíveis com OpenAI / Groq / Gemini / Ollama Function Calling."""
+        """Retorna os schemas JSON compatíveis com Function Calling (formato OpenAI usado por Groq/Gemini)."""
         return [
             {
                 "type": "function",

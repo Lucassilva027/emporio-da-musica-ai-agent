@@ -57,8 +57,6 @@ def _provider_configs() -> dict[str, dict[str, str]]:
     """Monta o mapa de provedores com as chaves atuais do ambiente."""
     groq_key = os.getenv("GROQ_API_KEY", "").strip()
     gemini_key = os.getenv("GEMINI_API_KEY", "").strip()
-    openai_key = os.getenv("OPENAI_API_KEY", "").strip()
-    ollama_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1").strip()
     return {
         "groq": {
             "provider": "groq",
@@ -72,18 +70,6 @@ def _provider_configs() -> dict[str, dict[str, str]]:
             "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
             "model": os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip(),
         },
-        "openai": {
-            "provider": "openai",
-            "api_key": openai_key,
-            "base_url": os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1").strip(),
-            "model": os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip(),
-        },
-        "ollama": {
-            "provider": "ollama",
-            "api_key": "ollama",
-            "base_url": ollama_url,
-            "model": os.getenv("OLLAMA_MODEL", "qwen2.5:7b").strip(),
-        },
         "local": {
             "provider": "local",
             "api_key": "",
@@ -96,7 +82,7 @@ def _provider_configs() -> dict[str, dict[str, str]]:
 def list_configured_cloud_providers() -> list[str]:
     """Provedores cloud com API key preenchida (ordem de preferência para failover)."""
     cfg = _provider_configs()
-    ordered = ["groq", "gemini", "openai"]
+    ordered = ["groq", "gemini"]
     return [name for name in ordered if cfg[name].get("api_key")]
 
 
@@ -114,11 +100,9 @@ def get_llm_config(override_provider: str | None = None) -> dict[str, str]:
     """Resolve dinamicamente a configuração do provedor de LLM.
 
     Suporta:
-    - groq (Gratuito e recomendado: qwen/qwen3.8-27b)
+    - groq (Gratuito: qwen/qwen3.8-27b)
     - gemini (Gratuito via Google AI Studio: gemini-2.5-flash)
-    - openai (gpt-4o-mini / gpt-4o)
-    - ollama (Modelos locais via http://localhost:11434/v1)
-    - local (Motor Híbrido Local Zero-Config com Embeddings + ReAct Determinístico)
+    - local (Motor Híbrido Local Zero-Config com Embeddings + SQLite/RAG)
     """
     provider = (override_provider or os.getenv("LLM_PROVIDER", "auto")).strip().lower()
     configs = _provider_configs()

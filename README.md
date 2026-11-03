@@ -37,12 +37,10 @@ O projeto funciona **sem nenhuma API key** graças ao motor local híbrido. Para
 | Provedor | Gratuito? | Onde obter a chave | Variável |
 |----------|-----------|--------------------|----------|
 | **Groq** (recomendado) | Sim | https://console.groq.com/keys | `GROQ_API_KEY` |
-| **Google Gemini** | Sim | https://aistudio.google.com/apikey | `GEMINI_API_KEY` |
-| OpenAI | Pago | https://platform.openai.com/api-keys | `OPENAI_API_KEY` |
-| Ollama | Local | Servidor em `localhost:11434` | `OLLAMA_MODEL` |
+| **Google Gemini** (failover) | Sim | https://aistudio.google.com/apikey | `GEMINI_API_KEY` |
 | Local | Sempre | Nenhuma | `LLM_PROVIDER=local` |
 
-`LLM_PROVIDER=auto` escolhe a primeira chave disponível; se nenhuma existir, usa o motor local.
+`LLM_PROVIDER=auto` prioriza Groq → Gemini. Se a Groq atingir rate limit, o agente faz failover automático para o Gemini. Sem keys, usa o motor local.
 
 ### 4. Interfaces
 
@@ -104,7 +102,7 @@ Cliente (CLI / Streamlit)
 
 | Camada | Papel |
 |--------|-------|
-| **Function Calling / ReAct** | Quando há LLM (Groq/Gemini/OpenAI/Ollama), o modelo decide quais tools chamar e sintetiza a resposta. |
+| **Function Calling / ReAct** | Quando há LLM (Groq/Gemini), o modelo decide quais tools chamar e sintetiza a resposta, com failover entre provedores. |
 | **Motor local determinístico** | Classifica intenção (produto, pedido, política, promo, frete, fora de escopo…) e orquestra as **mesmas tools** — útil para demo zero-config e fallback se a API cair. |
 | **RAG híbrido** | Políticas: embeddings densos (`all-MiniLM-L6-v2`) + TF-IDF + keyword boosting por seção do manual. |
 | **Tools SQL** | Preços, estoque, promoções, pedidos e elegibilidade de troca/garantia calculados deterministicamente (sem “alucinar” números). |

@@ -1,7 +1,7 @@
 """Núcleo do Agente de Atendimento da Empório da Música.
 
 Arquitetura híbrida:
-1. Function Calling ReAct via provedores OpenAI-compatíveis (Groq / Gemini / OpenAI / Ollama).
+1. Function Calling ReAct via provedores OpenAI-compatíveis (Groq / Gemini) com failover.
 2. Motor Local Determinístico (Zero-Config) que classifica intenção e orquestra as mesmas tools
    quando nenhuma API key estiver disponível — garantindo avaliação imediata do protótipo.
 """
@@ -164,7 +164,7 @@ class EmporioAgent:
         return fallback
 
     # ==========================================================================
-    # Function Calling via LLM (Groq / Gemini / OpenAI / Ollama)
+    # Function Calling via LLM (Groq / Gemini)
     # ==========================================================================
     def _run_llm_function_calling(self, user_message: str) -> AgentTurnResult:
         customer_ctx = self.db.get_customer_context(self.session_id)
