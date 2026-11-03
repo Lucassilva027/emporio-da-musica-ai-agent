@@ -19,7 +19,7 @@ import httpx
 from src.config import STORE_INFO, get_llm_config, get_reference_date
 from src.database import StoreDatabase, normalize_text
 from src.prompts import build_system_prompt
-from src.tools import StoreToolkit
+from src.tools import StoreToolkit, format_brl
 
 MAX_USER_MESSAGE_CHARS = 2000
 
@@ -316,6 +316,24 @@ class EmporioAgent:
                     args["customer_name"] = ctx["name"]
             result = call("check_order_status", args)
             reply = self._format_order_reply(result)
+        elif intent == "brands":
+            cat = ""
+            for official, aliases in {
+                "Violões": ["violao", "violoes"],
+                "Ukuleles": ["ukulele"],
+                "Guitarras": ["guitarra"],
+                "Baixos": ["baixo", "contrabaixo"],
+                "Baterias e Percussão": ["bateria"],
+                "Teclados e Pianos": ["teclado", "piano", "sintetizador"],
+            }.items():
+                if any(a in normalize_text(user_message) for a in aliases):
+                    cat = official
+                    break
+            result = call(
+                "list_brands",
+                {"category": cat, "only_available": True},
+            )
+            reply = self._format_brands_reply(result)
         elif intent == "promotions":
             camp = self._extract_campaign(user_message)
             result = call(
@@ -428,6 +446,25 @@ class EmporioAgent:
         ]
         if any(k in n for k in store_kw):
             return "store_info"
+
+        # "quais marcas", "que marcas tem", "marcas vocês possuem" — sem citar marca específica
+        brand_question = any(
+            k in n
+            for k in [
+                "quais marcas",
+                "que marcas",
+                "quais marca",
+                "marcas voces",
+                "marcas voce",
+                "marcas tem",
+                "marcas possuem",
+                "marcas trabalham",
+                "marcas disponiveis",
+                "lista de marcas",
+            ]
+        )
+        if brand_question:
+            return "brands"
 
         promo_kw = [
             "promocao", "promocoes", "desconto", "oferta", "black friday", "queima de estoque",
@@ -647,35 +684,75 @@ class EmporioAgent:
             lines.append("\nQuer que eu detalhe algum modelo, calcule o PIX/parcelamento ou o frete para sua cidade?")
         return "\n".join(lines)
 
+    def _format_brands_reply(self, result: dict[str, Any]) -> str:
+        brands = result.get("brands") or []
+        if not brands:
+            scope = result.get("resolved_category") or "catálogo"
+            return (
+                f"No momento não encontrei marcas com produtos disponíveis em **{scope}**. "
+                "Quer que eu liste as marcas de outra categoria (violões, guitarras, teclados…)?"
+            )
+
+        header = "**Marcas disponíveis no catálogo"
+        if result.get("resolved_category"):
+            header += f" ({result['resolved_category']})"
+        header += f":** {result.get('brands_count', len(brands))} marca(s)\n"
+
+        lines = [header]
+        for b in brands:
+            price_bit = ""
+            if b.get("min_price_brl") is not None and b.get("max_price_brl") is not None:
+                if abs(b["min_price_brl"] - b["max_price_brl"]) < 0.01:
+                    price_bit = f" — a partir de {_brl(b['min_price_brl'])}"
+                else:
+                    price_bit = f" — de {_brl(b['min_price_brl'])} a {_brl(b['max_price_brl'])}"
+            cats = ", ".join(b.get("categories") or [])
+            lines.append(
+                f"- **{b['brand']}**: {b['product_count']} produto(s)"
+                f"{price_bit}"
+                + (f" ({cats})" if cats else "")
+            )
+
+        lines.append(
+            "\nSe quiser, diga a marca (ex.: Yamaha, Fender, Takamine) ou a categoria "
+            "que eu te mostro os modelos disponíveis."
+        )
+        return "\n".join(lines)
+
     def _format_product_card(self, p: dict[str, Any], short: bool = False) -> str:
         promo = p.get("active_promotion")
+        stock = f"{p['stock_quantity']} em estoque" if p["is_available"] else p["effective_status"]
+        inst = (p.get("installment_plan") or {}).get("summary") or ""
+        # Escapa $ no resumo de parcelas (Streamlit / KaTeX)
+        inst_safe = inst.replace("$", r"\$")
+
         if promo:
-            price_line = (
-                f"~~{_brl(p['original_price_brl'])}~~ → **{_brl(p['effective_price_brl'])}** "
+            price_block = (
+                f"Preço: ~~{_brl(p['original_price_brl'])}~~ → **{_brl(p['effective_price_brl'])}** "
                 f"({promo['discount_percent']:.0f}% OFF — {promo['campaign']})"
             )
         else:
-            price_line = f"**{_brl(p['effective_price_brl'])}** | PIX: **{_brl(p['pix_price_brl'])}**"
-
-        stock = f"{p['stock_quantity']} em estoque" if p["is_available"] else p["effective_status"]
-        inst = p.get("installment_plan", {}).get("summary", "")
+            price_block = (
+                f"Preço: **{_brl(p['effective_price_brl'])}** · "
+                f"PIX: **{_brl(p['pix_price_brl'])}**"
+            )
 
         if short:
-            return f"• **{p['name']}** — {price_line} ({stock})"
+            return f"- **{p['name']}** — {price_block} ({stock})"
 
         desc = (p.get("description") or "")[:140]
-        card = (
-            f"\n• **{p['name']}** ({p['category_name']})\n"
-            f"  {price_line}"
-        )
-        if inst:
-            card += f" | {inst}"
-        card += f"\n  Estoque: {stock}"
+        lines = [
+            f"\n- **{p['name']}** ({p['category_name']})",
+            f"  - {price_block}",
+        ]
+        if inst_safe:
+            lines.append(f"  - Parcelamento: {inst_safe}")
+        lines.append(f"  - Estoque: {stock}")
         if desc:
-            card += f"\n  {desc}…"
+            lines.append(f"  - {desc}…")
         if p.get("data_quality_notes"):
-            card += f"\n  _Obs.: {p['data_quality_notes']}_"
-        return card
+            lines.append(f"  - _Obs. cadastral: {p['data_quality_notes']}_")
+        return "\n".join(lines)
 
     def _format_accessory_reply(self, result: dict[str, Any]) -> str:
         terms = ", ".join(result.get("matched_accessory_terms") or ["acessórios"])
@@ -871,21 +948,28 @@ class EmporioAgent:
         pix = pay.get("pix") or {}
         credit = pay.get("credit_card") or {}
 
+        def _esc(text: Any) -> str:
+            return str(text or "").replace("$", r"\$")
+
         lines = [
             f"**Pagamento para {_brl(result.get('base_amount_brl', 0))}:**",
-            f"• PIX: {pix.get('description')}",
-            f"• Débito: {_brl((pay.get('debit_card') or {}).get('amount_brl', 0))} à vista",
-            f"• Boleto: {_brl((pay.get('boleto') or {}).get('amount_brl', 0))} (compensa em até 3 dias úteis)",
-            f"• Crédito: {credit.get('summary')}",
-            f"• {pay.get('split_payment_rule')}",
+            f"- PIX: {_esc(pix.get('description'))}",
+            f"- Débito: {_brl((pay.get('debit_card') or {}).get('amount_brl', 0))} à vista",
+            f"- Boleto: {_brl((pay.get('boleto') or {}).get('amount_brl', 0))} (compensa em até 3 dias úteis)",
+            f"- Crédito: {_esc(credit.get('summary'))}",
+            f"- {_esc(pay.get('split_payment_rule'))}",
             "",
             "**Frete:**",
         ]
 
         if "shipping_cost_brl" in ship:
-            free = "🎁 Frete grátis!" if ship.get("is_free_shipping") else f"R$ {ship['shipping_cost_brl']:.2f}"
+            free = (
+                "🎁 Frete grátis!"
+                if ship.get("is_free_shipping")
+                else _brl(ship["shipping_cost_brl"])
+            )
             lines.append(
-                f"• {ship.get('region')}: {free} | Prazo: {ship.get('estimated_days')} | "
+                f"- {ship.get('region')}: {free} | Prazo: {ship.get('estimated_days')} | "
                 f"{ship.get('delivery_method')}"
             )
         else:
@@ -899,8 +983,8 @@ class EmporioAgent:
 
 
 def _brl(value: float | int | None) -> str:
-    v = float(value or 0)
-    return f"R$ {v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    """Atalho markdown-safe: escapa `$` para o Streamlit não abrir modo LaTeX."""
+    return format_brl(value, markdown_safe=True)
 
 
 def _preview(data: Any, limit: int = 280) -> str:

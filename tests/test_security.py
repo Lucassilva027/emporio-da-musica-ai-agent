@@ -33,6 +33,7 @@ def test_tool_allowlist_rejects_unknown_and_injection_names():
 
     assert ALLOWED_TOOLS == {
         "search_products",
+        "list_brands",
         "get_promotions",
         "check_order_status",
         "calculate_payment_and_shipping",

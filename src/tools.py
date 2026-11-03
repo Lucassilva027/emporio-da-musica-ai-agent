@@ -19,12 +19,54 @@ from src.rag import PolicyRAGEngine
 ALLOWED_TOOLS = frozenset(
     {
         "search_products",
+        "list_brands",
         "get_promotions",
         "check_order_status",
         "calculate_payment_and_shipping",
         "search_store_policies",
     }
 )
+
+# Marcas conhecidas no catálogo (ordem: nomes compostos primeiro)
+KNOWN_BRANDS: list[str] = [
+    "Music Man",
+    "Tagima Memphis",
+    "Tagima",
+    "Yamaha",
+    "Takamine",
+    "Taylor",
+    "Martin",
+    "Giannini",
+    "Rozini",
+    "Shelby",
+    "Crafter",
+    "Fender",
+    "Gibson",
+    "Ibanez",
+    "PRS",
+    "Kala",
+    "Ohana",
+    "Kalani",
+    "Pearl",
+    "Korg",
+    "Nord",
+    "Roland",
+]
+
+
+def extract_brand_from_name(product_name: str) -> str | None:
+    """Extrai a marca a partir do nome do produto (início ou ocorrência conhecida)."""
+    name_norm = normalize_text(product_name)
+    for brand in KNOWN_BRANDS:
+        bn = normalize_text(brand)
+        if name_norm.startswith(bn + " ") or name_norm == bn:
+            return brand
+    for brand in KNOWN_BRANDS:
+        bn = normalize_text(brand)
+        if f" {bn} " in f" {name_norm} ":
+            return brand
+    first = (product_name or "").strip().split(" ", 1)[0]
+    return first or None
 
 MAX_QUERY_CHARS = 300
 MAX_NAME_CHARS = 120
@@ -114,8 +156,20 @@ def compute_installment_plan(price_brl: float) -> dict[str, Any]:
     return {
         "max_installments": best_n,
         "installment_value_brl": round(price_brl / best_n, 2),
-        "summary": f"até {best_n}x de R$ {price_brl / best_n:,.2f} sem juros".replace(",", "X").replace(".", ",").replace("X", "."),
+        "summary": (
+            f"até {best_n}x de R$ {price_brl / best_n:,.2f} sem juros"
+            .replace(",", "X")
+            .replace(".", ",")
+            .replace("X", ".")
+        ),
     }
+
+
+def format_brl(value: float | int | None, *, markdown_safe: bool = True) -> str:
+    """Formata valor em BRL. Com markdown_safe=True, escapa `$` (Streamlit interpreta `$` como LaTeX)."""
+    v = float(value or 0)
+    raw = f"R$ {v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    return raw.replace("$", r"\$") if markdown_safe else raw
 
 
 def enrich_product_row(row: dict[str, Any], conn: Any) -> dict[str, Any]:
@@ -810,6 +864,77 @@ class StoreToolkit:
             "retrieved_sections": results,
         }
 
+    def list_brands(
+        self,
+        category: str = "",
+        only_available: bool = True,
+    ) -> dict[str, Any]:
+        """Lista marcas presentes no catálogo, opcionalmente filtradas por categoria."""
+        cat_norm = normalize_text(category)
+        resolved_category: str | None = None
+        if cat_norm:
+            for official_cat, aliases in CATEGORY_ALIASES.items():
+                if cat_norm in normalize_text(official_cat) or any(a in cat_norm for a in aliases):
+                    resolved_category = official_cat
+                    break
+
+        with self.db.get_connection() as conn:
+            sql = "SELECT product_id, name, category_name, is_available, price_brl FROM products WHERE 1=1"
+            params: list[Any] = []
+            if resolved_category:
+                sql += " AND category_name = ?"
+                params.append(resolved_category)
+            if only_available:
+                sql += " AND is_available = 1"
+            rows = [dict(r) for r in conn.execute(sql, params).fetchall()]
+
+        brand_stats: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            brand = extract_brand_from_name(row["name"]) or "Outros"
+            entry = brand_stats.setdefault(
+                brand,
+                {
+                    "brand": brand,
+                    "product_count": 0,
+                    "categories": set(),
+                    "min_price_brl": None,
+                    "max_price_brl": None,
+                },
+            )
+            entry["product_count"] += 1
+            entry["categories"].add(row["category_name"])
+            price = float(row["price_brl"])
+            entry["min_price_brl"] = price if entry["min_price_brl"] is None else min(entry["min_price_brl"], price)
+            entry["max_price_brl"] = price if entry["max_price_brl"] is None else max(entry["max_price_brl"], price)
+
+        brands = []
+        for brand, data in sorted(brand_stats.items(), key=lambda x: (-x[1]["product_count"], x[0])):
+            brands.append(
+                {
+                    "brand": data["brand"],
+                    "product_count": data["product_count"],
+                    "categories": sorted(data["categories"]),
+                    "min_price_brl": data["min_price_brl"],
+                    "max_price_brl": data["max_price_brl"],
+                }
+            )
+
+        # Categorias oficiais com produtos (para complementar a resposta)
+        categories_present = sorted({row["category_name"] for row in rows})
+
+        return {
+            "status": "ok",
+            "only_available": only_available,
+            "resolved_category": resolved_category,
+            "brands_count": len(brands),
+            "brands": brands,
+            "categories_in_scope": categories_present,
+            "hint": (
+                "Se o cliente perguntar por uma marca específica ausente desta lista, "
+                "informe com transparência que não há itens dessa marca no catálogo atual e sugira alternativas."
+            ),
+        }
+
     def get_openai_tool_schemas(self) -> list[dict[str, Any]]:
         """Retorna os schemas JSON compatíveis com OpenAI / Groq / Gemini / Ollama Function Calling."""
         return [
@@ -819,8 +944,9 @@ class StoreToolkit:
                     "name": "search_products",
                     "description": (
                         "Consulta o catálogo de instrumentos musicais da Empório da Música no banco de dados. "
-                        "Use SEMPRE que o cliente perguntar sobre produtos, modelos, marcas, preços, "
-                        "estoque/disponibilidade, especificações técnicas ou opções dentro de uma faixa de preço."
+                        "Use SEMPRE que o cliente perguntar sobre produtos, modelos, preços, "
+                        "estoque/disponibilidade, especificações técnicas ou opções dentro de uma faixa de preço. "
+                        "Para listar marcas disponíveis use list_brands."
                     ),
                     "parameters": {
                         "type": "object",
@@ -856,6 +982,32 @@ class StoreToolkit:
                             "only_promotions": {
                                 "type": "boolean",
                                 "description": "Se true, retorna apenas produtos com promoção ativa no momento.",
+                            },
+                        },
+                        "required": [],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "list_brands",
+                    "description": (
+                        "Lista as marcas de instrumentos disponíveis no catálogo da Empório da Música "
+                        "(com contagem de produtos e faixas de preço). Use quando o cliente perguntar "
+                        "'quais marcas vocês têm?', 'que marcas trabalham?', ou quiser um panorama de marcas "
+                        "por categoria (ex.: marcas de teclados)."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "category": {
+                                "type": "string",
+                                "description": "Opcional. Filtra marcas de uma categoria (ex.: 'Teclados e Pianos', 'Violões').",
+                            },
+                            "only_available": {
+                                "type": "boolean",
+                                "description": "Se true (padrão), considera apenas produtos disponíveis em estoque.",
                             },
                         },
                         "required": [],
@@ -1005,6 +1157,12 @@ class StoreToolkit:
                     only_available=bool(arguments.get("only_available", False)),
                     only_promotions=bool(arguments.get("only_promotions", False)),
                     limit=int(arguments.get("limit", 12)),
+                )
+            if name == "list_brands":
+                only_av = arguments.get("only_available")
+                return self.list_brands(
+                    category=str(arguments.get("category") or "")[:MAX_QUERY_CHARS],
+                    only_available=True if only_av is None else bool(only_av),
                 )
             if name == "get_promotions":
                 return self.get_promotions(
