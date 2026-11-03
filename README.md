@@ -176,14 +176,32 @@ Pipeline ETL em `src/database.py` (versão `2.0`):
 
 ---
 
+## Segurança e LGPD (protótipo)
+
+Medidas implementadas neste escopo:
+
+- **Segredos:** `.env` e `storage/*.db` no `.gitignore`; apenas `.env.example` versionado.
+- **Allowlist de tools:** nomes fora de `ALLOWED_TOOLS` são rejeitados (mitiga function-calling abusivo).
+- **SQL parametrizado** em todas as consultas SQLite.
+- **Minimização de PII:** e-mail/telefone mascarados nas respostas de pedidos; busca por telefone exige ≥ 8 dígitos.
+- **Homônimos (LGPD):** nomes ambíguos (ex.: “Bruno”) não listam pedidos — pedem e-mail/telefone/nº do pedido.
+- **Limites de input:** mensagem do usuário truncada (2000 chars); queries/top_k/valores monetários com teto.
+- **Erros:** falhas de API/tools não vazam stack trace nem corpo HTTP ao cliente final.
+- **Isolamento de sessão:** cada conversa tem `session_id` próprio no SQLite.
+
+Isto **não** substitui autenticação forte (OTP/WhatsApp) em produção.
+
+---
+
 ## Limitações conhecidas (e o que faria com mais tempo)
 
 1. **Motor local** é bom para precisão factual, mas menos “conversacional” que um LLM grande; com chave Groq/Gemini a fluência sobe bastante.
 2. **Identificação de cliente** por nome ainda é simples; em produção usaria OTP/WhatsApp Business + consentimento LGPD.
 3. **Categorias vazias** (sopro/orquestrais) e inconsistências cadastrais 135–144 são reportadas, mas não há UI de curadoria para o time da loja.
 4. **Frete interestadual** informa modalidades/prazos, sem cotação CEP real (não há API de Correios no escopo).
-5. **Avaliação automática** cobre happy paths; adicionaria dataset de golden answers + métricas de tool-selection accuracy.
+5. **Avaliação automática** cobre regras de negócio e segurança básica; adicionaria golden answers + tool-selection accuracy.
 6. Integração real com WhatsApp Cloud API / fila de handoff para humano em reclamações (Seção 7.3 — retorno em 24h).
+7. Consulta só por `order_id` ainda é um fator de conhecimento fraco — em produção exigiria 2FA.
 
 ---
 

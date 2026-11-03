@@ -16,6 +16,41 @@ from src.config import STORE_INFO, get_reference_date
 from src.database import StoreDatabase, normalize_text
 from src.rag import PolicyRAGEngine
 
+ALLOWED_TOOLS = frozenset(
+    {
+        "search_products",
+        "get_promotions",
+        "check_order_status",
+        "calculate_payment_and_shipping",
+        "search_store_policies",
+    }
+)
+
+MAX_QUERY_CHARS = 300
+MAX_NAME_CHARS = 120
+
+
+def mask_email(email: str | None) -> str | None:
+    """Mascara e-mail para exibição (LGPD / minimização de dados)."""
+    if not email or "@" not in email:
+        return email
+    local, _, domain = email.partition("@")
+    if not local:
+        return f"***@{domain}"
+    visible = local[0]
+    return f"{visible}***@{domain}"
+
+
+def mask_phone(phone: str | None) -> str | None:
+    """Mascara telefone mantendo DDD e últimos 4 dígitos."""
+    if not phone:
+        return phone
+    digits = "".join(ch for ch in phone if ch.isdigit())
+    if len(digits) < 8:
+        return "****"
+    return f"({digits[-11:-9] if len(digits) >= 11 else digits[:2]}) *****-{digits[-4:]}"
+
+
 ACCESSORY_KEYWORDS = [
     "encordoamento",
     "jogo de cordas",
@@ -184,8 +219,11 @@ class StoreToolkit:
         limit: int = 12,
     ) -> dict[str, Any]:
         """Busca instrumentos musicais no catálogo por nome, categoria, faixa de preço e especificações."""
+        query = (query or "")[:MAX_QUERY_CHARS]
+        category = (category or "")[:MAX_QUERY_CHARS]
         q_norm = normalize_text(query)
         cat_norm = normalize_text(category)
+        limit = max(1, min(int(limit or 12), 20))
 
         # Verifica se o cliente está buscando acessórios (fora de escopo da loja conforme Seção 1 e 7.1)
         combined_input = f"{q_norm} {cat_norm}".strip()
@@ -427,9 +465,15 @@ class StoreToolkit:
     ) -> dict[str, Any]:
         """Consulta status de pedidos, rastreamento e avalia automaticamente elegibilidade de devolução/troca/garantia."""
         ref_date = get_reference_date()
+        customer_name = (customer_name or "")[:MAX_NAME_CHARS]
+        customer_email = (customer_email or "")[:MAX_NAME_CHARS]
+        customer_phone = (customer_phone or "")[:40]
         name_norm = normalize_text(customer_name)
         email_norm = customer_email.strip().lower()
         phone_digits = "".join(ch for ch in customer_phone if ch.isdigit())
+        # Evita buscas por telefone excessivamente curtas (ex.: "67"), que vazaríam muitos clientes
+        if phone_digits and len(phone_digits) < 8:
+            phone_digits = ""
 
         with self.db.get_connection() as conn:
             matched_orders: list[dict[str, Any]] = []
@@ -587,8 +631,9 @@ class StoreToolkit:
                             "customer_id": o["customer_id"],
                             "name": o["customer_name"],
                             "city": o["customer_city"],
-                            "email": o["customer_email"],
-                            "phone": o["customer_phone"],
+                            # Minimização LGPD: e-mail/telefone mascarados na resposta das tools
+                            "email_masked": mask_email(o["customer_email"]),
+                            "phone_masked": mask_phone(o["customer_phone"]),
                         },
                         "items": items,
                         "return_and_warranty_eligibility": policy_eval,
@@ -936,45 +981,64 @@ class StoreToolkit:
             },
         ]
 
-    def execute_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
-        """Executa uma ferramenta pelo nome com validação segura de argumentos."""
+    def execute_tool(self, name: str, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Executa uma ferramenta pelo nome com allowlist e validação segura de argumentos."""
+        if name not in ALLOWED_TOOLS:
+            return {
+                "error": "tool_not_allowed",
+                "message": f"Ferramenta '{name}' não está na allowlist do agente.",
+            }
+        if arguments is None:
+            arguments = {}
+        if not isinstance(arguments, dict):
+            return {"error": "invalid_arguments", "message": "Os argumentos da tool devem ser um objeto JSON."}
+
         try:
             if name == "search_products":
                 return self.search_products(
-                    query=str(arguments.get("query") or ""),
-                    category=str(arguments.get("category") or ""),
+                    query=str(arguments.get("query") or "")[:MAX_QUERY_CHARS],
+                    category=str(arguments.get("category") or "")[:MAX_QUERY_CHARS],
                     max_price=float(arguments["max_price"]) if arguments.get("max_price") is not None else None,
                     min_price=float(arguments["min_price"]) if arguments.get("min_price") is not None else None,
-                    strings_type=str(arguments.get("strings_type") or ""),
+                    strings_type=str(arguments.get("strings_type") or "")[:40],
                     has_electronics=bool(arguments["has_electronics"]) if arguments.get("has_electronics") is not None else None,
                     only_available=bool(arguments.get("only_available", False)),
                     only_promotions=bool(arguments.get("only_promotions", False)),
+                    limit=int(arguments.get("limit", 12)),
                 )
             if name == "get_promotions":
                 return self.get_promotions(
                     include_expired=bool(arguments.get("include_expired", False)),
-                    campaign_name=str(arguments.get("campaign_name") or ""),
+                    campaign_name=str(arguments.get("campaign_name") or "")[:MAX_QUERY_CHARS],
                 )
             if name == "check_order_status":
                 oid = arguments.get("order_id")
                 return self.check_order_status(
                     order_id=int(oid) if oid is not None and str(oid).strip() != "" else None,
-                    customer_name=str(arguments.get("customer_name") or ""),
-                    customer_email=str(arguments.get("customer_email") or ""),
-                    customer_phone=str(arguments.get("customer_phone") or ""),
+                    customer_name=str(arguments.get("customer_name") or "")[:MAX_NAME_CHARS],
+                    customer_email=str(arguments.get("customer_email") or "")[:MAX_NAME_CHARS],
+                    customer_phone=str(arguments.get("customer_phone") or "")[:40],
                 )
             if name == "calculate_payment_and_shipping":
+                amount = float(arguments.get("amount_brl", 0.0))
+                if amount < 0 or amount > 1_000_000:
+                    return {"error": "invalid_amount", "message": "Valor fora da faixa permitida."}
                 return self.calculate_payment_and_shipping(
-                    amount_brl=float(arguments.get("amount_brl", 0.0)),
-                    city=str(arguments.get("city") or "Campo Grande"),
+                    amount_brl=amount,
+                    city=str(arguments.get("city") or "Campo Grande")[:80],
                     has_active_promotion=bool(arguments.get("has_active_promotion", False)),
                     is_large_instrument=bool(arguments.get("is_large_instrument", False)),
                 )
             if name == "search_store_policies":
+                top_k = int(arguments.get("top_k", 3))
+                top_k = max(1, min(top_k, 5))
                 return self.search_store_policies(
-                    query=str(arguments.get("query") or ""),
-                    top_k=int(arguments.get("top_k", 3)),
+                    query=str(arguments.get("query") or "")[:MAX_QUERY_CHARS],
+                    top_k=top_k,
                 )
-            return {"error": f"Ferramenta desconhecida: {name}"}
-        except Exception as exc:
-            return {"error": f"Erro ao executar {name}: {exc}"}
+            return {"error": "tool_not_allowed", "message": f"Ferramenta '{name}' não permitida."}
+        except (TypeError, ValueError) as exc:
+            return {"error": "invalid_arguments", "message": f"Argumentos inválidos para {name}: {exc}"}
+        except Exception:
+            # Não vaza stack trace / detalhes internos para o LLM ou UI
+            return {"error": "execution_failed", "message": f"Falha ao executar a ferramenta {name}."}

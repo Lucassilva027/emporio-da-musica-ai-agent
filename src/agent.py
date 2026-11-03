@@ -21,6 +21,8 @@ from src.database import StoreDatabase, normalize_text
 from src.prompts import build_system_prompt
 from src.tools import StoreToolkit
 
+MAX_USER_MESSAGE_CHARS = 2000
+
 
 @dataclass
 class AgentTurnResult:
@@ -82,6 +84,9 @@ class EmporioAgent:
                 session_id=self.session_id,
             )
 
+        if len(user_message) > MAX_USER_MESSAGE_CHARS:
+            user_message = user_message[:MAX_USER_MESSAGE_CHARS]
+
         self.db.save_message(self.session_id, "user", user_message)
         self._messages.append({"role": "user", "content": user_message})
 
@@ -90,13 +95,13 @@ class EmporioAgent:
         else:
             try:
                 result = self._run_llm_function_calling(user_message)
-            except Exception as exc:
-                # Fallback gracioso: se a API falhar, usa o motor local
+            except Exception:
+                # Fallback gracioso sem vazar detalhes internos da API ao cliente
                 fallback = self._run_local_engine(user_message)
                 fallback.reply = (
                     f"{fallback.reply}\n\n"
-                    f"_(Obs.: a API {self.provider_name} falhou — {type(exc).__name__}: {exc}. "
-                    "Resposta gerada pelo motor local de backup.)_"
+                    "_(Obs.: houve uma instabilidade no provedor de linguagem; "
+                    "usei o motor local de backup para não te deixar na mão.)_"
                 )
                 result = fallback
 
@@ -225,8 +230,9 @@ class EmporioAgent:
                 {
                     "customer_id": cust.get("customer_id"),
                     "name": cust.get("name"),
-                    "email": cust.get("email"),
-                    "phone": cust.get("phone"),
+                    # Persiste apenas versões mascaradas — evita PII em claro no SQLite de sessão
+                    "email_masked": cust.get("email_masked"),
+                    "phone_masked": cust.get("phone_masked"),
                     "city": cust.get("city"),
                     "last_order_id": orders[0].get("order_id"),
                 },
