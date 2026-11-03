@@ -17,7 +17,12 @@ from typing import Any, Callable
 
 import httpx
 
-from src.config import STORE_INFO, get_llm_config, get_reference_date
+from src.config import (
+    STORE_INFO,
+    get_failover_providers,
+    get_llm_config,
+    get_reference_date,
+)
 from src.database import StoreDatabase, normalize_text
 from src.prompts import build_system_prompt
 from src.tools import StoreToolkit, format_brl
@@ -25,7 +30,7 @@ from src.tools import StoreToolkit, format_brl
 MAX_USER_MESSAGE_CHARS = 2000
 MAX_TOOL_RESULT_CHARS = 3500
 LLM_HISTORY_MESSAGES = 6
-LLM_MAX_TOOL_ROUNDS = 2
+LLM_HTTP_RETRIES = 2  # tentativas por provedor em 429 (evita tempestade de calls)
 
 
 @dataclass
@@ -51,10 +56,12 @@ class EmporioAgent:
         self.session_id = session_id or str(uuid.uuid4())
         self.db = db or StoreDatabase()
         self.toolkit = toolkit or StoreToolkit(db=self.db)
+        self._preferred_provider = provider
         self.llm = get_llm_config(provider)
         self.on_tool_call = on_tool_call
         self.db.ensure_session(self.session_id)
         self._messages: list[dict[str, Any]] = []
+        self.last_llm_http_calls = 0
         self._bootstrap_history()
 
     def _bootstrap_history(self) -> None:
@@ -94,28 +101,11 @@ class EmporioAgent:
         self.db.save_message(self.session_id, "user", user_message)
         self._messages.append({"role": "user", "content": user_message})
 
+        self.last_llm_http_calls = 0
         if self.provider_name == "local" or not self.llm.get("api_key"):
             result = self._run_local_engine(user_message)
         else:
-            try:
-                result = self._run_llm_function_calling(user_message)
-            except Exception as exc:
-                # Fallback gracioso sem vazar detalhes internos da API ao cliente
-                fallback = self._run_local_engine(user_message)
-                err = str(exc)
-                if "429" in err or "rate_limit" in err.lower():
-                    note = (
-                        "_(Obs.: a API gratuita atingiu o limite de tokens por minuto. "
-                        "Respondi com o motor local; aguarde alguns segundos e tente de novo "
-                        "para usar o LLM.)_"
-                    )
-                else:
-                    note = (
-                        "_(Obs.: houve uma instabilidade no provedor de linguagem; "
-                        "usei o motor local de backup para não te deixar na mão.)_"
-                    )
-                fallback.reply = f"{fallback.reply}\n\n{note}"
-                result = fallback
+            result = self._run_with_provider_failover(user_message)
 
         self.db.save_message(
             self.session_id,
@@ -127,6 +117,51 @@ class EmporioAgent:
         result.session_id = self.session_id
         result.provider = self.provider_name if result.provider != "local" else result.provider
         return result
+
+    def _run_with_provider_failover(self, user_message: str) -> AgentTurnResult:
+        """Tenta o provedor atual e, em 429/erro, os demais com API key no .env."""
+        chain = get_failover_providers(self.provider_name)
+        if not chain:
+            chain = [self.provider_name]
+
+        original = dict(self.llm)
+        last_exc: Exception | None = None
+        tried: list[str] = []
+
+        for provider_name in chain:
+            cfg = get_llm_config(provider_name)
+            if not cfg.get("api_key"):
+                continue
+            self.llm = cfg
+            tried.append(provider_name)
+            try:
+                result = self._run_llm_function_calling(user_message)
+                # Mantém o provedor que funcionou nesta sessão (até Nova conversa / restart)
+                return result
+            except Exception as exc:
+                last_exc = exc
+                err = str(exc)
+                # Só faz failover automático em rate limit / indisponibilidade temporária
+                if not ("429" in err or "rate_limit" in err.lower() or "503" in err or "502" in err):
+                    break
+
+        self.llm = original
+        fallback = self._run_local_engine(user_message)
+        err_txt = str(last_exc or "")
+        if "429" in err_txt or "rate_limit" in err_txt.lower():
+            note = (
+                "_(Obs.: todos os provedores cloud configurados atingiram limite/cota "
+                f"({', '.join(tried) or 'nenhum'}). Respondi com o motor local; "
+                "aguarde ~20s ou adicione outra chave no `.env`.)_"
+            )
+        else:
+            note = (
+                "_(Obs.: houve instabilidade no provedor de linguagem"
+                + (f" após tentar: {', '.join(tried)}" if tried else "")
+                + "; usei o motor local de backup.)_"
+            )
+        fallback.reply = f"{fallback.reply}\n\n{note}"
+        return fallback
 
     # ==========================================================================
     # Function Calling via LLM (Groq / Gemini / OpenAI / Ollama)
@@ -221,22 +256,22 @@ class EmporioAgent:
 
         last_error = ""
         with httpx.Client(timeout=60.0) as client:
-            for attempt in range(4):
+            for attempt in range(LLM_HTTP_RETRIES):
+                self.last_llm_http_calls += 1
                 resp = client.post(url, headers=headers, json=payload)
                 if resp.status_code == 429:
                     last_error = resp.text[:400]
-                    # Free tier Groq: aguarda reset de tokens e tenta de novo
-                    wait_s = 1.5 * (attempt + 1)
+                    # Free tier: uma espera curta; se persistir, o failover troca de provedor
+                    wait_s = 1.2 * (attempt + 1)
                     reset = resp.headers.get("x-ratelimit-reset-tokens", "")
-                    # ex.: "771ms" ou "1.2s"
                     try:
                         if reset.endswith("ms"):
-                            wait_s = max(wait_s, float(reset[:-2]) / 1000.0 + 0.15)
+                            wait_s = max(wait_s, float(reset[:-2]) / 1000.0 + 0.2)
                         elif reset.endswith("s"):
-                            wait_s = max(wait_s, float(reset[:-1]) + 0.15)
+                            wait_s = max(wait_s, float(reset[:-1]) + 0.2)
                     except ValueError:
                         pass
-                    time.sleep(min(wait_s, 8.0))
+                    time.sleep(min(wait_s, 4.0))
                     continue
                 if resp.status_code >= 400:
                     raise RuntimeError(f"HTTP {resp.status_code}: {resp.text[:400]}")

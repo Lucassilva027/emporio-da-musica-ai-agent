@@ -14,7 +14,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from src.agent import EmporioAgent
-from src.config import STORE_INFO, get_llm_config
+from src.config import STORE_INFO, get_llm_config, list_configured_cloud_providers
 
 st.set_page_config(
     page_title="Empório da Música — Atendimento",
@@ -110,18 +110,27 @@ with st.sidebar:
 
     st.session_state.provider_choice = provider_choice
     cfg = get_llm_config(_provider_arg(provider_choice))
+    cloud_keys = list_configured_cloud_providers()
     st.markdown("---")
     st.markdown(f"**Configurado:** `{cfg['provider']}`")
     st.caption(cfg["model"])
+    st.caption(
+        "Failover cloud: " + (", ".join(cloud_keys) if cloud_keys else "nenhum — só motor local")
+    )
     if cfg["provider"] == "local":
         st.warning(
             "Nenhuma API key detectada no `.env`. "
-            "Preencha `GROQ_API_KEY` ou `GEMINI_API_KEY` e reinicie o Streamlit."
+            "Preencha `GROQ_API_KEY` e/ou `GEMINI_API_KEY` e reinicie o Streamlit."
         )
     elif not cfg.get("api_key"):
         st.error(f"Provedor `{provider_choice}` selecionado, mas a API key correspondente está vazia no `.env`.")
     else:
         st.success(f"API key detectada para `{cfg['provider']}`.")
+        if len(cloud_keys) == 1:
+            st.info(
+                "Dica anti-rate-limit: cadastre também o Gemini (grátis) no `.env` "
+                "para failover automático se a Groq estourar."
+            )
     st.markdown("---")
     st.markdown(
         f"**Endereço**\n\n{STORE_INFO['endereco']}\n\n"
@@ -159,7 +168,8 @@ if prompt:
             with st.expander("Ferramentas usadas"):
                 for t in result.tool_calls:
                     st.code(f"{t['name']}({t['arguments']})", language="python")
-        st.caption(f"Respondido via **{result.provider}**")
+        calls = getattr(agent, "last_llm_http_calls", 0)
+        st.caption(f"Respondido via **{result.provider}** · HTTP LLM nesta mensagem: **{calls}**")
 
     st.session_state.messages.append(
         {

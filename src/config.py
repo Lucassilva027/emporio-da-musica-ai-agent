@@ -53,6 +53,63 @@ def get_reference_date() -> date:
         return date(2026, 3, 23)
 
 
+def _provider_configs() -> dict[str, dict[str, str]]:
+    """Monta o mapa de provedores com as chaves atuais do ambiente."""
+    groq_key = os.getenv("GROQ_API_KEY", "").strip()
+    gemini_key = os.getenv("GEMINI_API_KEY", "").strip()
+    openai_key = os.getenv("OPENAI_API_KEY", "").strip()
+    ollama_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1").strip()
+    return {
+        "groq": {
+            "provider": "groq",
+            "api_key": groq_key,
+            "base_url": "https://api.groq.com/openai/v1",
+            "model": os.getenv("GROQ_MODEL", "qwen/qwen3.8-27b").strip(),
+        },
+        "gemini": {
+            "provider": "gemini",
+            "api_key": gemini_key,
+            "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+            "model": os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip(),
+        },
+        "openai": {
+            "provider": "openai",
+            "api_key": openai_key,
+            "base_url": os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1").strip(),
+            "model": os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip(),
+        },
+        "ollama": {
+            "provider": "ollama",
+            "api_key": "ollama",
+            "base_url": ollama_url,
+            "model": os.getenv("OLLAMA_MODEL", "qwen2.5:7b").strip(),
+        },
+        "local": {
+            "provider": "local",
+            "api_key": "",
+            "base_url": "",
+            "model": "local-hybrid-react-v1 (SentenceTransformers + SQLite)",
+        },
+    }
+
+
+def list_configured_cloud_providers() -> list[str]:
+    """Provedores cloud com API key preenchida (ordem de preferência para failover)."""
+    cfg = _provider_configs()
+    ordered = ["groq", "gemini", "openai"]
+    return [name for name in ordered if cfg[name].get("api_key")]
+
+
+def get_failover_providers(primary: str | None = None) -> list[str]:
+    """Cadeia de failover: primary (se cloud) + demais keys disponíveis, sem repetir."""
+    configured = list_configured_cloud_providers()
+    if not configured:
+        return []
+    if primary and primary in configured:
+        return [primary] + [p for p in configured if p != primary]
+    return configured
+
+
 def get_llm_config(override_provider: str | None = None) -> dict[str, str]:
     """Resolve dinamicamente a configuração do provedor de LLM.
 
@@ -64,55 +121,10 @@ def get_llm_config(override_provider: str | None = None) -> dict[str, str]:
     - local (Motor Híbrido Local Zero-Config com Embeddings + ReAct Determinístico)
     """
     provider = (override_provider or os.getenv("LLM_PROVIDER", "auto")).strip().lower()
-
-    groq_key = os.getenv("GROQ_API_KEY", "").strip()
-    gemini_key = os.getenv("GEMINI_API_KEY", "").strip()
-    openai_key = os.getenv("OPENAI_API_KEY", "").strip()
-    ollama_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1").strip()
+    configs = _provider_configs()
 
     if provider == "auto":
-        if groq_key:
-            provider = "groq"
-        elif gemini_key:
-            provider = "gemini"
-        elif openai_key:
-            provider = "openai"
-        else:
-            provider = "local"
+        configured = list_configured_cloud_providers()
+        provider = configured[0] if configured else "local"
 
-    if provider == "groq":
-        return {
-            "provider": "groq",
-            "api_key": groq_key,
-            "base_url": "https://api.groq.com/openai/v1",
-            # Groq descontinuou vários Llama públicos; qwen3.8-27b está disponível e com function calling
-            "model": os.getenv("GROQ_MODEL", "qwen/qwen3.8-27b").strip(),
-        }
-    if provider == "gemini":
-        return {
-            "provider": "gemini",
-            "api_key": gemini_key,
-            "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
-            "model": os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip(),
-        }
-    if provider == "openai":
-        return {
-            "provider": "openai",
-            "api_key": openai_key,
-            "base_url": os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1").strip(),
-            "model": os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip(),
-        }
-    if provider == "ollama":
-        return {
-            "provider": "ollama",
-            "api_key": "ollama",
-            "base_url": ollama_url,
-            "model": os.getenv("OLLAMA_MODEL", "qwen2.5:7b").strip(),
-        }
-
-    return {
-        "provider": "local",
-        "api_key": "",
-        "base_url": "",
-        "model": "local-hybrid-react-v1 (SentenceTransformers + SQLite)",
-    }
+    return dict(configs.get(provider, configs["local"]))
